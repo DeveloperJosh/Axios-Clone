@@ -1,0 +1,11 @@
+{
+  "name": "axios-clone",
+  "module": "src/index.js",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
