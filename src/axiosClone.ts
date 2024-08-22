@@ -22,13 +22,13 @@ export class AxiosClone implements AxiosInstance {
   private async requestWithRetry<T>(config: RequestConfig, retries: number, delay: number): Promise<Response<T>> {
     try {
       return await this.requestInternal<T>(config);
-    } catch (error) {
-      if (retries > 0) {
-        console.warn(`Request failed, retrying in ${delay}ms... (${retries} retries left)`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        return this.requestWithRetry(config, retries - 1, delay);
+    } catch (error: any) {
+      if (retries > 0 && (error.name === 'FetchError' || error.response?.status >= 500)) {
+        const backoffDelay = delay * Math.pow(2, this.retryOptions.retries - retries);
+        await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+        return this.requestWithRetry(config, retries - 1, backoffDelay);
       } else {
-        throw error;
+        throw new Error(`Request failed after ${this.retryOptions.retries} retries: ${error.message}`);
       }
     }
   }
@@ -37,43 +37,74 @@ export class AxiosClone implements AxiosInstance {
     if (!params) return url;
 
     const urlObj = new URL(url);
-    Object.keys(params).forEach(key => {
-      urlObj.searchParams.append(key, params[key]);
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach(val => urlObj.searchParams.append(key, val));
+      } else if (typeof value === 'object' && value !== null) {
+        Object.entries(value).forEach(([subKey, subVal]) => {
+          urlObj.searchParams.append(`${key}[${subKey}]`, subVal as string);
+        });
+      } else {
+        urlObj.searchParams.append(key, value);
+      }
     });
 
     return urlObj.toString();
   }
 
   private async requestInternal<T>(config: RequestConfig): Promise<Response<T>> {
-    const { method, url, data, headers, params } = config;
+    const { method, url, data, headers, params, timeout } = config;
 
-    // Append query parameters if provided
     const fullUrl = this.appendParamsToUrl(url!, params);
 
-    const response = await fetch(fullUrl, {
+    const controller = new AbortController();
+    const timeoutId = timeout ? setTimeout(() => controller.abort(), timeout) : undefined;
+
+    const fetchOptions: RequestInit = {
       method,
       headers,
-      body: data ? JSON.stringify(data) : undefined,
-    });
-
-    const responseData = await response.json().catch(() => ({}));
-
-    return {
-      status: response.status,
-      headers: response.headers,
-      config,
-      data: responseData,
+      body: data && typeof data !== 'string' ? JSON.stringify(data) : data,
+      signal: controller.signal,
     };
+
+    try {
+      const response = await fetch(fullUrl, fetchOptions);
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('Content-Type');
+      let responseData: any;
+      if (contentType?.includes('application/json')) {
+        responseData = await response.json();
+      } else if (contentType?.includes('text/')) {
+        responseData = await response.text();
+      } else {
+        responseData = await response.blob();
+      }
+
+      return {
+        status: response.status,
+        headers: response.headers,
+        config,
+        data: responseData,
+      };
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        throw new Error('Request timed out');
+      }
+      throw new Error(`Network error: ${error.message}`);
+    }
   }
 
   async request<T>(config: AxiosRequestConfig): Promise<Response<T>> {
-    // Apply request interceptors
     let processedConfig: RequestConfig = { ...config, method: config.method || 'GET' };
     for (const interceptor of this.interceptors.request) {
       processedConfig = interceptor(processedConfig);
     }
 
-    // Retry logic
     const { retries, delay } = this.retryOptions;
     let response: Response<T>;
     try {
@@ -82,7 +113,6 @@ export class AxiosClone implements AxiosInstance {
       throw error;
     }
 
-    // Apply response interceptors
     for (const interceptor of this.interceptors.response) {
       response = interceptor(response);
     }

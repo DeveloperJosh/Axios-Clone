@@ -8,7 +8,8 @@ export interface RequestConfig {
   url?: string;
   headers?: Record<string, string>;
   data?: any;
-  params?: Record<string, any>; // Add params here
+  params?: Record<string, any>; 
+  timeout?: number;
 }
 
 export interface AxiosRequestConfig extends Omit<RequestConfig, 'method' | 'url'> {
