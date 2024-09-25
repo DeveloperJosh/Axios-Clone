@@ -1,25 +1,14 @@
 import axios from 'axios';
 import { AxiosClone } from './axiosClone';
+import { exec } from 'child_process';
 
 const axiosClone = new AxiosClone({ retries: 3, delay: 1000 });
 
-axios.get('https://nekonode.net/api/latest', {
-  headers: { 'Content-Type': 'application/json' },
-  params: {
-    page: 1,
-    type: 2,
-    limit: 10,
-  },
-})
+function randomCode() {
+  return Math.floor(Math.random() * 100000);
+}
 
-axiosClone.get('https://nekonode.net/api/latest', {
-  headers: { 'Content-Type': 'application/json' },
-  params: {
-    page: 1,
-    type: 2,
-    limit: 10,
-  },
-})
+const code = randomCode();
   
 interface Metrics {
   totalTime: number;
@@ -308,7 +297,7 @@ function generateHTMLReport(
 `;
 
   //writeFileSync('performance-report.html', htmlContent, 'utf8');
-  Bun.write('performance-report.html', htmlContent);
+  Bun.write(`./reports/${code}-performance-report.html`, htmlContent);
 }
 
 async function runTests() {
@@ -329,7 +318,15 @@ async function runTests() {
   // Generate the HTML report
   generateHTMLReport(analyzedAxiosMetrics, analyzedAxiosCloneMetrics, timeDifference, percentageDifference);
 
-  console.log('Performance report generated: performance-report.html');
+  const path = `./reports/${code}-performance-report.html`;
+
+  // open the generated report in the default browser
+  console.log(`Performance report generated: ${path}, Opening in the default browser...`);
+  exec(`start ${path}`, (err) => {
+    if (err) {
+      console.error('Failed to open the report:', err);
+    }
+  });
 }
 
 runTests();
